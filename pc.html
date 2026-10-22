@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>提词器 · 电脑控台</title>
+<style>
+@font-face{font-family:"TPFont";src:url("tpfont.ttf") format("truetype");font-weight:400;font-display:block}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1115;color:#e6e6e6;font-family:-apple-system,"Microsoft YaHei",sans-serif;min-height:100vh;padding:18px 20px 40px}
+h1{font-size:17px;font-weight:600;color:#fff;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+h1 .dot{width:8px;height:8px;border-radius:50%;background:#555;display:inline-block}h1 .dot.on{background:#34c759;box-shadow:0 0 8px #34c759}
+.addr{font-size:12px;color:#8a8f98;font-weight:400}
+.verbar{display:none;margin-top:12px;padding:10px 14px;border-radius:8px;background:#3a2f16;border:1px solid #6b5620;color:#ffd479;font-size:13px}
+.verbar button{background:#6b5620;color:#fff;padding:5px 10px;font-size:12px;margin-left:8px}
+.wrap{display:grid;grid-template-columns:minmax(360px,1fr) minmax(320px,420px);gap:18px;margin-top:16px;align-items:start}
+@media(max-width:980px){.wrap{grid-template-columns:1fr}}
+.card{background:#171a21;border:1px solid #262b36;border-radius:10px;padding:14px}
+.card h2{font-size:13px;color:#8a8f98;font-weight:500;margin-bottom:10px;letter-spacing:.04em}
+textarea{width:100%;height:300px;background:#0d0f13;color:#dfe3e8;border:1px solid #262b36;border-radius:8px;padding:12px;font-size:14px;line-height:1.7;resize:vertical;outline:none;font-family:inherit}
+textarea:focus{border-color:#3a7afe}
+.row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+button{border:none;border-radius:7px;padding:9px 14px;font-size:13px;cursor:pointer;background:#2a3140;color:#e6e6e6;font-family:inherit}
+button:hover{background:#38414f}
+button.pri{background:#0a84ff;color:#fff}
+button.pri:hover{background:#2b96ff}
+button.warn{background:#3a2226;color:#ff9a9a}
+button:disabled{opacity:.35;cursor:default}
+.hint{font-size:12px;color:#697080;line-height:1.7;margin-top:8px}
+.phonecap{display:none}
+.meter{font-size:13px;color:#34c759}
+.cnt{font-size:12px;color:#8a8f98}
+.span2{grid-column:1 / -1}
+.prevrow{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.prevside{flex:0 0 250px;min-width:230px;display:flex;flex-direction:column;gap:8px}
+/* 固定尺寸的"手机屏幕": 尺寸近似 iPhone 横屏 844x390, 内容再长也不撑大 */
+.phonebox{flex:1 1 560px;max-width:844px;aspect-ratio:844 / 390;background:#000;border:1px solid #262b36;border-radius:10px;
+  position:relative;overflow:hidden;flex-shrink:0}
+.phonestage{position:absolute;top:0;left:0;display:flex;flex-direction:column;background:#000;transform-origin:top left;overflow:hidden}
+.mtbar{display:flex;align-items:center;justify-content:space-between;background:#1a1a1a;color:#666;
+  padding:0 12px;font-size:13px;flex-shrink:0;white-space:nowrap;overflow:hidden}
+.mbody{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0}
+.mtx{width:100%;color:#fff;overflow:hidden;font-family:"TPFont","Microsoft YaHei",sans-serif}
+.mline{white-space:pre;text-align:inherit}
+.mcbar{display:flex;align-items:center;justify-content:center;background:#1a1a1a;color:#fff;
+  font-size:14px;flex-shrink:0;white-space:nowrap}
+.mcbar span{padding:0 10px}
+.truth{font-size:12.5px;line-height:1.7;color:#c9ced8;background:#0d0f13;border:1px solid #262b36;border-radius:8px;padding:8px 10px}
+.truth b{font-weight:600}
+.truth .ok{color:#34c759}
+.truth .bad{color:#ff8080}
+.truth .dim{color:#6b7280}
+.fsval{min-width:40px;text-align:center;font-size:13px;color:#e6e6e6;align-self:center}
+.navrow{display:flex;gap:8px;margin-top:10px}
+.navrow button{flex:1;padding:12px 0;font-size:14px}
+ol{list-style:none;margin-top:12px;max-height:280px;overflow:auto}
+ol li{display:flex;gap:8px;align-items:flex-start;padding:7px 8px;border-radius:6px;font-size:12.5px;color:#aeb4bf;line-height:1.5}
+ol li.cur{background:#12321f;color:#8ff0b0}
+ol li .tx{flex:1;cursor:pointer;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+ol li .no{color:#5b6270;min-width:22px}
+ol li .del{background:none;color:#6b7280;padding:0 4px;font-size:14px;line-height:1}
+ol li .del:hover{color:#ff8080;background:none}
+.n{color:#5b6270;font-size:12px}
+.sent{color:#34c759;font-size:12px;margin-left:6px;opacity:0;transition:opacity .2s}
+.sent.on{opacity:1}
+</style>
+</head>
+<body>
+<h1>
+  <span class="dot" id="phDot"></span>电脑控台
+  <span class="addr">手机打开 <b id="addrPhone">—</b> ｜ 本页 <b id="addrPc">—</b></span>
+  <span class="n" id="verline" style="margin-left:auto;font-size:11px"></span>
+  <span class="n" id="phState"></span>
+</h1>
+
+<div class="verbar" id="verbar">
+  服务端页面已更新，这个页面还是旧版（可能少了新按钮）。刷新一下就好，草稿不会丢。
+  <button onclick="location.reload()">刷新页面</button>
+</div>
+
+<div class="wrap">
+  <div class="card span2">
+    <h2>手机上正显示 <span class="n">（按手机实测的尺寸 + 折行逐行还原；行数与手机完全一致）</span></h2>
+    <div class="prevrow">
+      <div class="phonebox" id="phonebox">
+        <div class="phonestage" id="phonestage">
+          <div class="mtbar" id="mtbar">提词器</div>
+          <div class="mbody" id="mbody"><div class="mtx" id="mtx">等手机上那页报数据…</div></div>
+          <div class="mcbar" id="mcbar">
+            <span>‹ 上一段</span><span>A−</span><span id="msz">—</span><span>A＋</span><span>下一段 ›</span>
+          </div>
+        </div>
+      </div>
+      <div class="prevside">
+        <div class="meter" id="meter">—</div>
+        <div class="cnt" id="cnt"></div>
+        <div class="cnt" id="vpInfo"></div>
+        <div class="truth" id="truth">手机实测：等手机上那页报数据…</div>
+        <div class="navrow">
+          <button id="prev" onclick="step(-1)">‹ 上一段</button>
+          <button id="next" class="pri" onclick="step(1)">下一段 ›</button>
+        </div>
+        <div class="navrow">
+          <button onclick="fontBy(-4)">A−</button>
+          <span class="fsval" id="fsVal">32</span>
+          <button onclick="fontBy(4)">A＋</button>
+        </div>
+        <div class="navrow">
+          <button id="keyBtn" onclick="toggleKeys()">键盘 ↑↓ 换段：关</button>
+        </div>
+        <div class="hint">字号两端共用：这里改了手机跟着变，手机上调了这里也跟着变。键盘按钮点一下变「开」，鼠标不在输入框里时按 ↑ / ↓ 就是上一段 / 下一段。</div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>整篇稿子 — 粘进来，按空行切成段</h2>
+      <textarea id="big" placeholder="把整篇口播稿粘这里。空行分段；没有任何空行时，一行算一段。&#10;&#10;发出去后手机就停在第 1 段，你按「下一段」往下走。"></textarea>
+      <div class="row">
+        <button class="pri" onclick="sendAll()">切分并发送（从第1段开始）</button>
+        <span class="sent" id="sentAll">已发送 ✓</span>
+      </div>
+      <div class="hint">发送会覆盖当前整篇，并把段号重置到第 1 段。手机上正在看的那一段会立刻换掉。</div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2>临时补发单独一段</h2>
+      <textarea id="one" style="height:100px" placeholder="只在需要插一段时用。发出去后会追加到末尾并直接跳到这一段。"></textarea>
+      <div class="row">
+        <button onclick="sendOne()">追加并跳到这一段</button>
+        <span class="sent" id="sentOne">已发送 ✓</span>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>分段列表 <span class="n">（点文字跳到那段）</span></h2>
+      <ol id="list"></ol>
+      <div class="row">
+        <button class="warn" onclick="clearAll()">清空整篇</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var lastRev = -1, lastSegs = "", total = 0, idx = 0;
+var APP_VER = "2026-10-22-samebreaks2";     // 与服务端 server.py 的 APP_VER 必须一致
+
+function $(id){return document.getElementById(id)}
+
+/* 页面对不上服务端版本 -> 自动刷新(粘稿草稿已存 localStorage, 不会丢); 显示版本号便于核对 */
+function checkVer(d){
+  var el = $("verline");
+  if(el){
+    if(d.ver && d.ver !== APP_VER){ el.textContent = "页面 " + APP_VER + " ≠ 服务端 " + d.ver + "，正在刷新…"; el.style.color = "#ff8080"; }
+    else { el.textContent = "页面 " + APP_VER + " ✓ 与服务端一致"; el.style.color = "#5b6270"; }
+  }
+  if(d.ver && d.ver !== APP_VER){
+    var k = "pc_ver_" + d.ver;
+    try{
+      if(sessionStorage.getItem(k)) return;
+      sessionStorage.setItem(k, "1");
+    }catch(e){ return; }
+    location.reload();
+  }
+}
+
+/* 粘稿草稿: 刷新/误关页面都不丢 */
+(function(){
+  var ta = $("big");
+  try{
+    var draft = localStorage.getItem("pc_draft");
+    if(draft) ta.value = draft;
+  }catch(e){}
+  ta.addEventListener("input", function(){
+    try{ localStorage.setItem("pc_draft", ta.value) }catch(e){}
+  });
+})();
+
+$("addrPhone").textContent = location.protocol + "//" + location.host + "/";
+$("addrPc").textContent = location.protocol + "//" + location.host + "/pc";
+
+function flash(id){
+  var el = $(id);
+  el.classList.add("on");
+  setTimeout(function(){ el.classList.remove("on") }, 1600);
+}
+
+function post(path, body){
+  return fetch(path, {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(body || {})
+  }).then(function(r){return r.json()});
+}
+
+function sendAll(){
+  var t = $("big").value.trim();
+  if(!t){ alert("先把整篇稿子粘进去"); return; }
+  if(total > 0 && !confirm("会覆盖当前整篇（" + total + " 段），并回到第 1 段。继续？")) return;
+  post("/api/script", {text:t, mode:"replace", c:"pc"}).then(function(d){
+    if(!d || !d.ok){ alert("发送失败：服务端没响应"); return; }
+    render(d); flash("sentAll");
+  }).catch(function(){ alert("发送失败：连不上服务端"); });
+}
+
+function sendOne(){
+  var t = $("one").value.trim();
+  if(!t){ alert("要补发的那一段先写进去"); return; }
+  post("/api/script", {text:t, mode:"append", c:"pc"}).then(function(d){
+    if(!d || !d.ok){ alert("发送失败：服务端没响应"); return; }
+    render(d); flash("sentOne");
+    $("one").value = "";
+  }).catch(function(){ alert("发送失败：连不上服务端"); });
+}
+
+function step(delta){
+  post("/api/next", {delta:delta, c:"pc"}).then(function(d){ if(d && d.ok) renderFromState(d) }).catch(function(){});
+}
+
+function goto(i){
+  post("/api/goto", {idx:i, c:"pc"}).then(function(d){ if(d && d.ok) renderFromState(d) }).catch(function(){});
+}
+
+function del(i){
+  if(!confirm("删掉第 " + (i+1) + " 段？")) return;
+  post("/api/del", {idx:i, c:"pc"}).then(function(d){ if(d && d.ok) render(d) }).catch(function(){});
+}
+
+function clearAll(){
+  if(!total) return;
+  if(!confirm("清空全部 " + total + " 段？手机那边会变成空提示。")) return;
+  post("/api/clear", {}).then(function(d){ if(d && d.ok) render(d) }).catch(function(){});
+}
+
+/* 预览框内容是 iframe 里的真手机页, 这里只管统计数字 */
+var curText = "", curFs = 32;
+
+function paintCap(){
+  var chars = curText ? curText.replace(/\s/g, "").length : 0;
+  $("cnt").textContent = (curText ? chars + " 字" : "—") + " · 字号 " + curFs;
+}
+
+function applyFs(fs){
+  if(!fs) return;
+  curFs = fs;
+  $("fsVal").textContent = fs;
+  paintCap();
+}
+
+/* 预览尺寸 = 手机自报的可视区(手机每 1.2s 报一次), 所以跟手机上那块屏幕一样大 */
+var curW = 844, curH = 390;
+var phoneVpx = null;
+/* 手机上真正量到的数字: 行数/文字块高/可用高 —— 预览受字体差异影响, 以这几项为准 */
+function paintTruth(){
+  var v = phoneVpx;
+  var el = $("truth");
+  if(!v || !v.lines){
+    el.innerHTML = "手机实测：<span class='dim'>等手机上那页报数据…（打开手机提词器即可）</span>";
+    return;
+  }
+  var mirTxt = "";
+  var lines = +v.lines || 0, h = +v.tbh || 0, avail = +v.vwH || 0;
+  var sh = +v.tbSH || 0, ch = +v.tbCH || 0;
+  var scrollOver = (sh && ch && sh - ch > 1) ? (sh - ch) : 0;
+  var verdict;
+  if(scrollOver) verdict = "<b class='bad'>一屏装不下，手机上要滚动 " + scrollOver + "px</b>";
+  else if(avail && h > avail) verdict = "<b class='bad'>超出 " + (h - avail) + "px</b>";
+  else if(!avail) verdict = "<span class='dim'>—</span>";
+  else verdict = "<b class='ok'>装得下</b>（余 " + (avail - h) + "px）";
+  var myLines = document.querySelectorAll("#mtx .mline").length;
+  var sameLine = (myLines === lines);
+  var cmp = sameLine
+    ? "<b class='ok'>控台 " + myLines + " 行 = 手机 " + lines + " 行 ✓</b>"
+    : "<b class='bad'>控台 " + myLines + " 行 ≠ 手机 " + lines + " 行，正在同步…</b>";
+  var t0 = (curText || "").slice(0, 3), t1 = (curText || "").slice(-3);
+  el.innerHTML = "手机实测：<b>" + lines + " 行</b> · 首「" + t0 + "」尾「" + t1 + "」 · 文字块 <b>" + h + "px</b> / 可用 " + avail + "px · " + verdict + mirTxt
+               + "<br>" + cmp;
+}
+
+function applyVp(vp){
+  if(!vp || !vp.w || !vp.h) return;
+  if(vp.w === curW && vp.h === curH) return;
+  curW = vp.w; curH = vp.h;
+  var box = $("phonebox");
+  box.style.aspectRatio = curW + " / " + curH;
+  box.style.maxWidth = curW + "px";
+  $("vpInfo").textContent = "手机可视区 " + curW + " × " + curH;
+  setupPreview();
+}
+
+function hashTxt(s){
+  var h = 0, n = (s || "").length;
+  for(var i = 0; i < n; i++) h = (h * 31 + s.charCodeAt(i)) % 2147483647;
+  return n + ":" + h;
+}
+
+/* 按手机报回来的折行位置切成行数组: 折行与手机逐行一致, 与字体无关 */
+function breakByWraps(text, wraps){
+  var out = [], prev = 0;
+  if(!wraps || wraps.length < 2) return text ? [text] : [];
+  for(var i = 1; i < wraps.length; i++){
+    var cut = wraps[i];
+    if(cut > prev && cut <= text.length){ out.push(text.slice(prev, cut)); prev = cut; }
+  }
+  out.push(text.slice(prev));
+  return out;
+}
+
+/* 仿手机屏: 尺寸/顶栏/底栏/字号/折行全用手机量到的数, 再按手机每行实测宽度校准字号 */
+var lastShotv = -1, curShotv = 0, curSegWraps = null;
+function paintMock(){
+  var v = phoneVpx, stage = $("phonestage"), el = $("mtx");
+  if(!v || !v.tbh){
+    el.textContent = "等手机上那页报数据…";
+    return;
+  }
+  stage.style.width = (v.iw || curW) + "px";
+  stage.style.height = (v.ih || curH) + "px";
+
+  $("mtbar").style.display = "";
+  $("mcbar").style.display = "";
+  $("mtbar").style.height = (v.tbar || 38) + "px";
+  $("mcbar").style.height = (v.cbar || 47) + "px";
+  $("mtbar").textContent = "提词器　　第 " + (idx + 1) + "/" + total + " 段";
+  $("msz").textContent = v.fs || "—";
+
+  var availH = v.vwH || ((v.ih || 414) - (v.tbar || 0) - (v.cbar || 0));
+  var over = (v.tbSH && v.tbCH && v.tbSH - v.tbCH > 1);
+  var body = $("mbody");
+  body.style.height = availH + "px";
+  body.style.alignItems = over ? "flex-start" : "center";   // 手机上超一屏是从顶部开始滚
+
+  var P = v.padT || "20px", R = v.padR || "20px", B = v.padB || "20px", L = v.padL || "20px";
+  el.style.padding = P + " " + R + " " + B + " " + L;
+  el.style.textAlign = v.ta || "center";
+  // 控台始终正向显示(用户要正常读), 不跟手机镜像
+
+  /* 折行来源: 只认手机给的。
+     1) 实时上报(v.wraps)一定是最新排版下算的, 优先;
+     2) 预计算(segwraps)要"排版印章"匹配才有效(改了字号后旧的全作废);
+     3) 都没有 -> 显示占位, 绝不拿浏览器自己折的行冒充 */
+  var wsrc = null;
+  if(v.wh && v.wh === hashTxt(curText) && v.wraps && v.wraps[0] === 0){
+    wsrc = v;
+  } else if(curSegWraps && curSegWraps.wh === hashTxt(curText) && curSegWraps.wraps
+            && curSegWraps.wraps[0] === 0
+            && curSegWraps.wstamp === (v.wstamp || curSegWraps.wstamp)){
+    wsrc = curSegWraps;
+  }
+  var same = !!wsrc;
+  var fs = +(v.fs || 24), lh = parseFloat(v.lh) || fs * 1.7;
+  var lines;
+  if(same) lines = breakByWraps(curText, wsrc.wraps);
+  else {
+    lines = [];
+    el.style.opacity = "0.35";
+    el.textContent = "正在等手机算好这段的换行…";
+    el.style.fontSize = fs + "px";
+    el.style.lineHeight = lh + "px";
+    setupPreview();
+    return;
+  }
+  el.style.opacity = "1";
+
+  /* 只做一件事: 按手机给的折行原样分行, 字号和行高就是手机报的值, 不改不缩不动字距 */
+  el.style.fontSize = fs + "px";
+  el.style.lineHeight = lh + "px";
+  el.innerHTML = "";
+  lines.forEach(function(line){
+    var d = document.createElement("div");
+    d.className = "mline";
+    d.textContent = line;
+    el.appendChild(d);
+  });
+  setupPreview();
+}
+
+/* 把 手机可视区 等比缩放进框里(框宽上限 = 手机宽度, 也就是 k ≤ 1, 与手机 1:1) */
+function setupPreview(){
+  var box = $("phonebox"), stage = $("phonestage");
+  if(!box || !stage) return;
+  var k = box.clientWidth / curW;
+  stage.style.transform = "scale(" + k + ")";
+}
+window.addEventListener("resize", setupPreview);
+
+/* 字号两端共用: 改的是服务端的值, 手机端轮询到就跟着变 */
+function fontBy(delta){
+  post("/api/font", {delta:delta, c:"pc"}).then(function(d){
+    if(d && d.ok) renderFromState(d);
+  }).catch(function(){});
+}
+
+function paintCur(text){
+  curText = text || "";
+  paintCap();
+}
+
+/* 键盘 ↑↓ 换段: 默认关, 免得在输入框里打字时误触; 点按钮「开」后才生效 */
+var keysOn = false;
+try{ keysOn = localStorage.getItem("pc_keys") === "1" }catch(e){}
+
+function paintKeyBtn(){
+  var b = $("keyBtn");
+  if(!b) return;
+  b.textContent = "键盘 ↑↓ 换段：" + (keysOn ? "开" : "关");
+  b.classList.toggle("pri", keysOn);
+}
+
+function toggleKeys(){
+  keysOn = !keysOn;
+  try{ localStorage.setItem("pc_keys", keysOn ? "1" : "0") }catch(e){}
+  paintKeyBtn();
+}
+
+document.addEventListener("keydown", function(e){
+  if(!keysOn) return;
+  var tag = ((e.target && e.target.tagName) || "").toUpperCase();
+  if(tag === "TEXTAREA" || tag === "INPUT") return;   // 在写稿时 ↑↓ 还是移光标
+  if(e.key === "ArrowUp" || e.key === "ArrowDown"){
+    e.preventDefault();
+    step(e.key === "ArrowDown" ? 1 : -1);
+  }
+});
+paintKeyBtn();
+
+/* 完整的 /api/full 返回 → 重绘 */
+function render(d){
+  total = d.total || 0;
+  idx = d.idx || 0;
+  lastRev = d.rev;
+  var segs = d.segs || [];
+  lastSegs = JSON.stringify(segs);
+
+  $("meter").textContent = total ? ("第 " + (idx + 1) + " / " + total + " 段") : "—";
+  paintCur(d.text);
+  applyFs(d.fs);
+  applyVp(d.vp);
+  if(d.vpx) phoneVpx = d.vpx;
+  if(d.shotv !== undefined) curShotv = d.shotv;
+  if(d.segwraps) curSegWraps = d.segwraps; else if(d.idx !== undefined) curSegWraps = null;
+  paintTruth();
+  paintMock();
+  if(d.lan) $("addrPhone").textContent = "http://" + d.lan + ":" + (d.port || 8000) + "/";
+  $("prev").disabled = !total || idx <= 0;
+  $("next").disabled = !total || idx >= total - 1;
+
+  var ol = $("list");
+  ol.innerHTML = "";
+  segs.forEach(function(s, i){
+    var li = document.createElement("li");
+    if(i === idx) li.className = "cur";
+    var no = document.createElement("span");
+    no.className = "no";
+    no.textContent = (i + 1) + ".";
+    var tx = document.createElement("span");
+    tx.className = "tx";
+    tx.textContent = s;
+    tx.onclick = function(){ goto(i) };
+    var bt = document.createElement("button");
+    bt.className = "del";
+    bt.textContent = "×";
+    bt.title = "删除这一段";
+    bt.onclick = function(){ del(i) };
+    li.appendChild(no); li.appendChild(tx); li.appendChild(bt);
+    ol.appendChild(li);
+  });
+  if(!segs.length){
+    var li = document.createElement("li");
+    li.innerHTML = "<span class='n'>还没有段落 — 先把稿子粘到左边发送</span>";
+    ol.appendChild(li);
+  }
+  if(d.online) paintOnline(d.online);
+}
+
+/* 手机按了下一段时，这里是 /api/state 的短返回，只更新当前段 */
+function renderFromState(d){
+  idx = d.idx || 0; total = d.total || 0; lastRev = d.rev;
+  $("meter").textContent = total ? ("第 " + (idx + 1) + " / " + total + " 段") : "—";
+  paintCur(d.text);
+  applyFs(d.fs);
+  applyVp(d.vp);
+  if(d.vpx) phoneVpx = d.vpx;
+  if(d.shotv !== undefined) curShotv = d.shotv;
+  if(d.segwraps) curSegWraps = d.segwraps; else if(d.idx !== undefined) curSegWraps = null;
+  paintTruth();
+  paintMock();
+  $("prev").disabled = !total || idx <= 0;
+  $("next").disabled = !total || idx >= total - 1;
+  var lis = $("list").children;
+  for(var i=0;i<lis.length;i++) lis[i].className = (i === idx ? "cur" : "");
+}
+
+function paintOnline(on){
+  var ph = !!on.phone;
+  $("phDot").classList.toggle("on", ph);
+  $("phState").textContent = ph ? "手机在线" : "手机未连着（打开手机上那个提词器图标即可）";
+  $("phState").style.color = ph ? "#34c759" : "#6b7280";
+}
+
+/* 每 2s 同步一次：段号/文字/在线状态，手机那边按了这里也会跟上 */
+function poll(){
+  fetch("/api/full?c=pc", {cache:"no-store"}).then(function(r){return r.json()}).then(function(d){
+    if(!d || !d.ok) return;
+    checkVer(d);
+    var sig = JSON.stringify(d.segs || []);
+    if(d.rev !== lastRev || sig !== lastSegs || d.shotv !== lastShotv) render(d);
+    else { renderFromState(d); if(d.online) paintOnline(d.online); }
+  }).catch(function(){
+    $("phDot").classList.remove("on");
+    $("phState").textContent = "服务没响应";
+    $("phState").style.color = "#ff8080";
+  });
+}
+setupPreview();
+if(document.fonts && document.fonts.ready){
+  document.fonts.ready.then(function(){ paintMock(); setupPreview(); });
+}
+poll();
+setInterval(poll, 800);
+</script>
+</body>
+</html>

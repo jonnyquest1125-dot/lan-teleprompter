@@ -1,0 +1,12 @@
+# 运行期状态与数据(含真实文稿), 不进仓库
+state.json
+vpx.json
+wraps.json
+*.log
+
+# 可选字体: 把本机 Deng.ttf 拷进来改名为 tpfont.ttf 可让预览字宽更接近手机
+# (16MB, 且为微软字体, 不随仓库分发)
+tpfont.ttf
+
+__pycache__/
+*.pyc

@@ -1,0 +1,524 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>提词器</title>
+<!-- iPhone / iPad：添加到主屏幕后全屏运行（无地址栏） -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="提词器">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-180.png">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+/* 关掉 iOS Safari 的自动字号放大(text-size-adjust): 否则手机实际字比设的值大 ~18%,
+   电脑控台的等比预览就对不上, 也就没法在电脑上定字号 */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{background:#000;color:#fff;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;overflow:hidden;height:100vh;height:100dvh;width:100vw;display:flex;flex-direction:column;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+@media(orientation:portrait){.hint{position:fixed;inset:0;background:#000;z-index:900;display:flex;align-items:center;justify-content:center;color:#555;font-size:18px}}
+@media(orientation:landscape){.hint{display:none}}
+
+.tbar{display:flex;align-items:center;justify-content:space-between;padding:6px 12px;background:#1a1a1a;flex-shrink:0;z-index:10}
+.tbar .tt{color:#666;font-size:13px;white-space:nowrap}
+.tbar .tt b{color:#34c759;font-weight:600}
+.tb{display:flex;gap:4px}
+.tb button{padding:5px 8px;border:none;border-radius:5px;font-size:11px;cursor:pointer}
+.g{background:#34c759;color:#fff}.h{background:#555;color:#fff}.b{background:#007aff;color:#fff}
+.tb .active{background:#007aff;color:#fff}
+
+.ed{flex:1;padding:12px;display:none;flex-direction:column}
+.ed textarea{flex:1;background:#111;color:#e0e0e0;border:1px solid #222;border-radius:8px;padding:12px;font-size:16px;line-height:1.6;resize:none;outline:none;font-family:inherit}
+.ed .sb{padding:12px;margin-top:8px;border:none;border-radius:6px;background:#007aff;color:#fff;font-size:15px;cursor:pointer}
+.ed .nt{color:#555;font-size:12px;margin-top:6px;line-height:1.5}
+
+.vw{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.vw.mirror{-webkit-transform:scaleX(-1);transform:scaleX(-1)}
+.vw .tx{text-align:center;padding:20px;width:100%;word-break:break-word;line-height:1.7;overflow-y:auto;max-height:100%;-webkit-text-size-adjust:none;text-size-adjust:none}
+.mline{white-space:pre;text-align:inherit}
+.vw .tx.idle{color:#3a3a3a;font-size:20px}
+
+.cbar{display:flex;align-items:center;justify-content:center;padding:8px 10px;background:#1a1a1a;flex-shrink:0;gap:8px;z-index:10}
+.cbar button{padding:6px 12px;border:none;border-radius:4px;font-size:14px;cursor:pointer;background:#444;color:#fff}
+.cbar button.nav{background:#2c2c2c;font-size:15px;padding:6px 14px}
+.cbar button:disabled{opacity:.35}
+.cbar .sv{color:#fff;font-size:12px;min-width:24px;text-align:center}
+
+.tip{display:none;position:fixed;left:0;right:0;bottom:0;z-index:1000;background:#181818;border-top:1px solid #2c2c2c;color:#e6e6e6;font-size:15px;line-height:1.65;padding:14px 46px calc(14px + env(safe-area-inset-bottom)) 16px}
+.tip b{color:#34c759}
+.tip .x{position:absolute;top:4px;right:8px;font-size:22px;line-height:1;color:#666;padding:8px 10px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="hint"><span>📱 横屏使用</span></div>
+
+<div class="tip" id="tip">
+  <span class="x" id="tipX">&times;</span>
+  <b>存成图标，以后点一下就用：</b><br>
+  点底部「分享」⬆️ → 向下找「添加到主屏幕」→ 添加
+</div>
+
+<div class="tbar">
+  <span class="tt">提词器 <b id="meter">—</b></span>
+  <div class="tb">
+    <button class="h" onclick="openEd()">✏️</button>
+    <button class="h" id="mirrorBtn" onclick="toggleMirror()">⇄</button>
+    <button class="b" onclick="toggleFull()">⛶</button>
+  </div>
+</div>
+
+<div class="ed" id="editor">
+  <textarea id="txtIn" placeholder="粘贴台词内容…（空行分段，没有空行时一行一段）"></textarea>
+  <button class="sb" onclick="saveAndShow()">保存并显示</button>
+  <div class="nt">保存在电脑那一端，手机和电脑看到的永远同一份。已录到第几段会重回到第 1 段。</div>
+</div>
+
+<div class="vw" id="viewer">
+  <div class="tx idle" id="textBox">电脑端控台还没发稿 — 等它在 /pc 发送后这里会自动出现</div>
+</div>
+
+<div class="cbar" id="ctrlBar">
+  <button class="nav" id="prevBtn" onclick="step(-1)">‹ 上一段</button>
+  <button onclick="szDown()">A−</button>
+  <span class="sv" id="szVal">32</span>
+  <button onclick="szUp()">A＋</button>
+  <button class="nav" id="nextBtn" onclick="step(1)">下一段 ›</button>
+</div>
+
+<script>
+var sz = 32, mir = false;
+var revSeen = -1, curIdx = 0, total = 0, editing = false;
+var APP_VER = "2026-10-22-samebreaks2";     // 与服务端 server.py 的 APP_VER 必须一致
+/* 谁在访问: 手机是 phone, 电脑控台里那个缩小预览是 pcprev(不计入"手机在线") */
+var CLIENT = (function(){
+  var m = /[?&]c=([a-z]+)/.exec(location.search);
+  return (m && m[1]) || "phone";
+})();
+
+/* 服务端页面版本变了 = 手机上的 JS 过期了 -> 自己刷新一次(每个版本只刷一次, 不会死循环) */
+function verStale(d){
+  if(!d.ver || d.ver === APP_VER) return false;
+  var k = "tp_ver_" + d.ver;
+  try{
+    if(sessionStorage.getItem(k)) return false;
+    sessionStorage.setItem(k, "1");
+  }catch(e){ return false; }
+  location.reload();
+  return true;
+}
+
+function $(id){return document.getElementById(id)}
+
+function openEd(){
+  editing = true;
+  $("editor").style.display = "flex";
+  $("viewer").style.display = "none";
+  $("ctrlBar").style.display = "none";
+  pullFull();
+}
+
+function closeEd(){
+  editing = false;
+  $("editor").style.display = "none";
+  $("viewer").style.display = "flex";
+  $("ctrlBar").style.display = "flex";
+}
+
+/* 编辑器预填服务端全文，避免手机上改稿时看不到原稿 */
+function pullFull(){
+  fetch("/api/full?c=" + CLIENT, {cache:"no-store"}).then(function(r){return r.json()}).then(function(d){
+    if(!d || !d.ok) return;
+    var ta = $("txtIn");
+    if(document.activeElement === ta) return;           // 正在打字不覆盖
+    if(ta.value.trim()) return;                          // 本地已有内容不覆盖
+    ta.value = (d.segs || []).join("\n\n");
+  }).catch(function(){});
+}
+
+function saveAndShow(){
+  var t = $("txtIn").value.trim();
+  if(!t){ alert("先粘贴台词内容"); return; }
+  if(total > 0 && curIdx > 0 && !confirm("会重新切成段落并回到第 1 段，继续？")) return;
+  fetch("/api/script", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({text:t, mode:"replace", c:CLIENT})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(!d || !d.ok){ alert("保存失败：服务端没响应"); return; }
+    revSeen = d.rev;
+    render(d);
+    closeEd();
+    goFull();
+  }).catch(function(){ alert("保存失败：连不上电脑端服务"); });
+}
+
+/* 手机自己按上一段/下一段 —— 服务端统一记段号 */
+function step(delta){
+  fetch("/api/next", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({delta:delta, c:CLIENT})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(!d || !d.ok) return;
+    render(d);
+  }).catch(function(){});
+}
+
+function render(d){
+  curIdx = d.idx || 0;
+  total = d.total || 0;
+  if(d.fs && d.fs !== sz){ sz = d.fs; applySz(); }   // 电脑上改了字号, 这里跟上
+  setTimeout(function(){
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){ lastVpSent = 0; reportVp(); });   // 等布局彻底画完再量
+    });
+  }, 80);
+  var box = $("textBox");
+  if(d.text){
+    box.classList.remove("idle");
+    box.textContent = d.text;
+    box.scrollTop = 0;
+    /* 量出断点后, 手机自己也按这份断点逐行显示 —— 与控台同源, 换行必然一致 */
+    var br = linesOf(box, d.text);
+    window.__lastBreaks = br.wraps; window.__lws = br.lws;
+    box.innerHTML = "";
+    for(var li2 = 0; li2 < br.wraps.length; li2++){
+      var a2 = br.wraps[li2], b2 = (li2 + 1 < br.wraps.length) ? br.wraps[li2 + 1] : d.text.length;
+      var dv = document.createElement("div");
+      dv.className = "mline";
+      dv.textContent = d.text.slice(a2, b2);
+      box.appendChild(dv);
+    }
+  } else {
+    box.classList.add("idle");
+    box.textContent = "电脑端控台还没发稿 — 等它在 /pc 发送后这里会自动出现";
+    window.__lastBreaks = []; window.__lws = [];
+  }
+  var ttt = d.text || "";
+  var nL = (window.__lastBreaks || []).length;
+  $("meter").textContent = total
+    ? ("第 " + (curIdx + 1) + "/" + total + " 段 · " + nL + "行 · 首「" + ttt.slice(0, 3) + "」尾「" + ttt.slice(-3) + "」")
+    : "—";
+  $("prevBtn").disabled = !total || curIdx <= 0;
+  $("nextBtn").disabled = !total || curIdx >= total - 1;
+}
+
+/* 文本指纹: 让电脑端确认"这组折行是这段文字的", 换段不会用错 */
+function hashTxt(s){
+  var h = 0, n = (s || "").length;
+  for(var i = 0; i < n; i++) h = (h * 31 + s.charCodeAt(i)) % 2147483647;
+  return n + ":" + h;
+}
+
+/* 折行位置: 手机上每一行从第几个字开始 —— 电脑端照这个排版, 折行就与手机完全一致 */
+/* 通用: 给任意元素(含一个文本节点)算出每行断点与每行实宽 —— 手机上用它给每一段都算好 */
+function linesOf(el, txt){
+  var node = el.firstChild;
+  if(!node || node.nodeType !== 3) return {wraps: [], lws: []};
+  txt = txt || node.nodeValue || "";
+  var out = [0], lastTop = null, lws = [], minL = null, maxR = null;
+  var rng = document.createRange();
+  for(var i = 0; i < txt.length; i++){
+    rng.setStart(node, i); rng.setEnd(node, i + 1);
+    var r = rng.getBoundingClientRect();
+    if(r.width === 0 && r.height === 0) continue;
+    if(lastTop === null){ lastTop = r.top; minL = r.left; maxR = r.right; continue; }   // 第一个字只记基准
+    if(Math.abs(r.top - lastTop) > 2){
+      out.push(i); lws.push(Math.round((maxR - minL) * 100) / 100);
+      lastTop = r.top; minL = r.left; maxR = r.right;
+    } else {
+      minL = Math.min(minL, r.left); maxR = Math.max(maxR, r.right);
+    }
+  }
+  if(minL !== null) lws.push(Math.round((maxR - minL) * 100) / 100);
+
+  /* 保守修正: 行尾最后一个字若已贴到/越过右边(不足1px余量), 把它挪到下一行 ——
+     屏幕渲染按设备像素取整后, 这种贴边字实际会被折下去, 量出来的和看到的不一样 */
+  try{
+    var cs2 = getComputedStyle(el);
+    var padL2 = parseFloat(cs2.paddingLeft) || 0;
+    var padR2 = parseFloat(cs2.paddingRight) || 0;
+    var box2 = el.getBoundingClientRect();
+    var edge = box2.left + padL2 + (el.clientWidth - padL2 - padR2);
+    var fixed = [0], fws = [];
+    for(var k = 1; k < out.length; k++){
+      var cut = out[k];
+      while(cut > fixed[fixed.length - 1] && cut <= txt.length){
+        rng.setStart(node, cut - 1); rng.setEnd(node, cut);
+        var cr = rng.getBoundingClientRect();
+        if(cr.width > 0 && cr.right >= edge - 2) cut--;
+        else break;
+      }
+      if(cut > fixed[fixed.length - 1]){
+        fixed.push(cut);
+        rng.setStart(node, fixed[fixed.length - 2]); rng.setEnd(node, cut);
+        var lr = rng.getBoundingClientRect();
+        fws.push(Math.round(lr.width * 100) / 100);
+      }
+    }
+    return {wraps: fixed, lws: fws.length ? fws : lws};
+  }catch(e){}
+  return {wraps: out, lws: lws};
+}
+
+function computeWraps(){
+  return window.__lastBreaks || [];   // render() 量好并存下的, 与手机屏幕显示的是同一份
+}
+
+/* ===== 预先把"每一段"的折行都算好(手机算, 存服务端), 电脑端切到哪段都不用等 ===== */
+var wrapStamp = "", wrapQueue = [], measureEl = null;
+
+function vpStamp(){
+  var cs = getComputedStyle($("textBox"));
+  return cs.fontSize + "|" + $("textBox").clientWidth + "|" + (document.fonts && document.fonts.check('24px "TPFont"') ? 1 : 0);
+}
+
+function ensureMeasure(){
+  if(!measureEl){
+    measureEl = document.createElement("div");
+    measureEl.style.cssText = "position:fixed;left:-99999px;top:0;visibility:hidden;pointer-events:none";
+    document.body.appendChild(measureEl);
+  }
+  var tb = $("textBox"), cs = getComputedStyle(tb);
+  measureEl.style.width = tb.clientWidth + "px";
+  measureEl.style.fontSize = cs.fontSize;
+  measureEl.style.fontFamily = cs.fontFamily;
+  measureEl.style.lineHeight = cs.lineHeight;
+  measureEl.style.padding = cs.paddingTop + " " + cs.paddingRight + " " + cs.paddingBottom + " " + cs.paddingLeft;
+  measureEl.style.textAlign = cs.textAlign;
+  measureEl.style.whiteSpace = "normal";
+  measureEl.style.wordBreak = "break-word";
+  return measureEl;
+}
+
+function pumpWraps(){
+  if(CLIENT !== "phone") return;
+  if(vpStamp() !== wrapStamp){          // 字号/宽度/字体变了 -> 全部重算
+    wrapStamp = vpStamp();
+    wrapQueue = [];
+  }
+  if(!wrapQueue.length) return;
+  var el = ensureMeasure();
+  for(var n = 0; n < 2 && wrapQueue.length; n++){
+    var item = wrapQueue.shift();
+    el.textContent = item.text;
+    var r = linesOf(el, item.text);
+    fetch("/api/wraps", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({c:"phone", idx:item.idx, wh:hashTxt(item.text), wraps:r.wraps, lws:r.lws, wstamp:wrapStamp})}).catch(function(){});
+  }
+}
+
+function reloadSegs(){
+  if(CLIENT !== "phone") return;
+  fetch("/api/full?c=phone", {cache:"no-store"}).then(function(r){return r.json()}).then(function(d){
+    var segs = d.segs || [];
+    var stamp = vpStamp() + "|" + hashTxt(segs.join("\u0001"));
+    if(stamp === window.__segStamp) return;
+    window.__segStamp = stamp;
+    wrapQueue = [];
+    for(var i = 0; i < segs.length; i++) wrapQueue.push({idx:i, text:segs[i]});
+  }).catch(function(){});
+}
+
+/* 把手机上这块文字区原样画成图片发给电脑端: 位置/字体/大小全部照 DOM 抄, 电脑端直接显示这张图 */
+function pushShot(){
+  if(CLIENT !== "phone") return;
+  var el = $("textBox"), rects = window.__lineRects || [], lines = window.__lines || [];
+  if(!el || !rects.length) return;
+  var box = el.getBoundingClientRect();
+  var w = Math.round(box.width), h = Math.round(box.height);
+  if(!w || !h) return;
+  var cs = getComputedStyle(el);
+  var dpr = Math.min(3, window.devicePixelRatio || 1);
+  var cv = document.createElement("canvas");
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  var c = cv.getContext("2d");
+  c.scale(dpr, dpr);
+  c.fillStyle = "#000"; c.fillRect(0, 0, w, h);
+  c.fillStyle = "#fff";
+  c.font = cs.fontSize + " " + cs.fontFamily;
+  c.textBaseline = "middle";
+  var centered = (cs.textAlign === "center");
+  var padL = parseFloat(cs.paddingLeft) || 0;
+  var padR = parseFloat(cs.paddingRight) || 0;
+  for(var i = 0; i < rects.length && i < lines.length; i++){
+    var r = rects[i];
+    if(centered){
+      c.textAlign = "center";
+      c.fillText(lines[i], padL + (w - padL - padR) / 2, r.t - box.top + r.h / 2);
+    } else {
+      c.textAlign = "left";
+      c.fillText(lines[i], r.l - box.left, r.t - box.top + r.h / 2);
+    }
+  }
+  try{
+    var url = cv.toDataURL("image/png");
+    fetch("/api/shot", {method:"POST", headers:{"Content-Type":"application/json"},
+                        body: JSON.stringify({c:"phone", png:url})}).catch(function(){});
+  }catch(e){}
+}
+
+/* 上报详细尺寸: 让电脑端能对齐到"手机上真正量到的数"(innerWidth 不等于渲染尺寸时能看出来) */
+var lastVpSent = 0;
+var lastWrapKey = "";
+function reportVp(){
+  if(CLIENT !== "phone") return;
+  var now = Date.now();
+  if(now - lastVpSent < 2000) return;
+  lastVpSent = now;
+  var tb = document.getElementById("textBox").getBoundingClientRect();
+  var tbar = document.querySelector(".tbar").getBoundingClientRect();
+  var cbar = $("ctrlBar").getBoundingClientRect();
+  var vv = window.visualViewport || {};
+  var tbEl = document.getElementById("textBox");
+  var cs = getComputedStyle(tbEl);
+  var rng = document.createRange();
+  rng.selectNodeContents(tbEl);
+  var lines = (window.__lastBreaks || []).length, lw = 0;
+  var lwsArr = window.__lws || [];
+  for(var li = 0; li < lwsArr.length; li++) lw = Math.max(lw, lwsArr[li]);
+  var body = {
+    c: "phone",
+    iw: Math.round(window.innerWidth), ih: Math.round(window.innerHeight),
+    cw: document.documentElement.clientWidth, ch: document.documentElement.clientHeight,
+    bw: document.body.clientWidth, bh: document.body.clientHeight,
+    vw: Math.round(vv.width || 0), vh: Math.round(vv.height || 0),
+    sw: screen.width, sh: screen.height, dpr: window.devicePixelRatio || 1,
+    fs: sz,
+    tbw: Math.round(tb.width), tbh: Math.round(tb.height),
+    tbar: Math.round(tbar.height), cbar: Math.round(cbar.height),
+    cf: cs.fontSize, lh: cs.lineHeight, ff: cs.fontFamily.slice(0, 40),
+    padL: cs.paddingLeft, padR: cs.paddingRight,
+    tbCW: tbEl.clientWidth, tbSW: tbEl.scrollWidth,
+    vwW: Math.round(document.querySelector(".vw").getBoundingClientRect().width),
+    vwH: Math.round(document.querySelector("#viewer").getBoundingClientRect().height),
+    tbSH: tbEl.scrollHeight, tbCH: tbEl.clientHeight,
+    fsW: Math.round(document.querySelector("#viewer").getBoundingClientRect().width),
+    lines: lines, lw: Math.round(lw),
+    ua: navigator.userAgent.slice(0, 140)
+  };
+  /* 探针: 同字符串在"当前字体"下的宽度, 用于和电脑端逐位比对是否同一套字形 */
+  try{
+    var pb = document.createElement("span");
+    pb.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font-family:" +
+      cs.fontFamily + ";font-size:" + cs.fontSize + ";line-height:" + cs.lineHeight;
+    pb.textContent = '测试"引号"：一二三四五六七八九十ABC，句号。';
+    document.body.appendChild(pb);
+    body.pw = Math.round(pb.getBoundingClientRect().width * 100) / 100;
+    pb.remove();
+    body.pff = getComputedStyle(document.body).fontFamily.slice(0, 30);
+  }catch(e){}
+  body.mir = mir ? 1 : 0;            // 手机是否开了镜像(⇄): 控台预览必须跟着镜像
+  body.wstamp = vpStamp();          // 当前排版印章: 字号|宽度|字体 一变, 旧折行全部作废
+  body.wh = hashTxt(tbEl.textContent);
+  try{ body.ffok = (document.fonts && document.fonts.check('24px "TPFont"')) ? 1 : 0; }catch(e){ body.ffok = -1; }
+  var wrapKey = body.wh + "|" + sz + "|" + window.innerWidth + "|" + Math.round(tb.height);
+  if(wrapKey !== lastWrapKey){
+    lastWrapKey = wrapKey;
+    body.wraps = computeWraps();      // 只在变了才重算, 录的时候不折腾
+    body.lws = window.__lws || [];
+    body.padT = cs.paddingTop; body.padB = cs.paddingBottom;
+    body.ta = cs.textAlign;
+  }
+  fetch("/api/vp", {method:"POST", headers:{"Content-Type":"application/json"},
+                    body: JSON.stringify(body)}).catch(function(){});
+}
+
+/* 轮询：电脑一按发送，这里自己换词，不用手动刷新（手动刷也有效） */
+function poll(){
+  var q = "/api/state?c=" + CLIENT;
+  if(CLIENT === "phone") q += "&w=" + Math.round(window.innerWidth) + "&h=" + Math.round(window.innerHeight);
+  fetch(q, {cache:"no-store"}).then(function(r){return r.json()}).then(function(d){
+    if(!d || !d.ok) return;
+    if(verStale(d)) return;
+    reportVp();
+    if(d.rev !== revSeen){ revSeen = d.rev; render(d); }
+    else { curIdx = d.idx; total = d.total; }
+  }).catch(function(){});
+}
+
+function toggleMirror(){
+  mir = !mir;
+  lastVpSent = 0; reportVp();       // 镜像一开一关, 立刻让电脑端知道
+  $("viewer").classList.toggle("mirror", mir);
+  $("mirrorBtn").classList.toggle("active", mir);
+  try{localStorage.setItem("tp_mir", mir ? "1" : "0")}catch(e){}
+}
+
+function toggleFull(){
+  if(document.fullscreenElement || document.webkitFullscreenElement){
+    if(document.exitFullscreen) document.exitFullscreen();
+    else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+  } else goFull();
+}
+
+function goFull(){
+  var el = document.documentElement;
+  if(el.requestFullscreen) el.requestFullscreen().catch(function(){});
+  else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+}
+
+function szUp(){ szBy(FS_STEP); }
+function szDown(){ szBy(-FS_STEP); }
+
+/* 字号也是两端共用的: 点这里改 = 服务端记, 电脑控台上的数字跟着变; 电脑上改这里也跟着变 */
+var FS_STEP = 4;
+function szBy(delta){
+  fetch("/api/font", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({delta:delta, c:CLIENT})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d && d.ok && d.fs){ sz = d.fs; applySz(); }
+  }).catch(function(){
+    sz = Math.max(16, Math.min(72, sz + delta));   // 连不上就只在本地先动
+    applySz();
+  });
+}
+
+function applySz(){
+  $("textBox").style.fontSize = sz + "px";
+  $("szVal").textContent = sz;
+  try{localStorage.setItem("tp_sz", sz)}catch(e){}
+}
+
+/* 恢复上次字号 / 镜像 */
+try{
+  var s = parseInt(localStorage.getItem("tp_sz"), 10);
+  if(s >= 16 && s <= 72) sz = s;
+  if(localStorage.getItem("tp_mir") === "1"){ mir = true; $("viewer").classList.add("mirror"); $("mirrorBtn").classList.add("active"); }
+}catch(e){}
+applySz();
+
+/* iPhone/iPad 未装图标时，提示一次"添加到主屏幕" */
+(function(){
+  var tip = $("tip");
+  var st = (window.navigator.standalone === true) || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  var ua = navigator.userAgent;
+  var isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var closed = false;
+  try{ closed = localStorage.getItem("tp_tip") === "1" }catch(e){}
+  if(isIOS && !st && !closed) tip.style.display = "block";
+  $("tipX").onclick = function(){
+    tip.style.display = "none";
+    try{localStorage.setItem("tp_tip","1")}catch(e){}
+  };
+})();
+
+/* 字体加载完再量一遍折行: 不然量到的是回退字体的折行 */
+if(document.fonts && document.fonts.ready){
+  document.fonts.ready.then(function(){ lastWrapKey = ""; lastVpSent = 0; reportVp(); });
+}
+
+/* 上电即取一次，然后每 1.2s 轮询 */
+poll();
+setInterval(poll, 400);           // 快一点: 换段/改字号后立刻重算折行报给电脑端
+reloadSegs();
+setInterval(reloadSegs, 3000);    // 稿子/字号变了就重排队
+setInterval(pumpWraps, 200);      // 每 200ms 算 2 段, 80 段约 8 秒铺完
+</script>
+</body>
+</html>
