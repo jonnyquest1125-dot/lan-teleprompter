@@ -2,6 +2,7 @@
 state.json
 vpx.json
 wraps.json
+campos.json
 *.log
 
 # 可选字体: 把本机 Deng.ttf 拷进来改名为 tpfont.ttf 可让预览字宽更接近手机

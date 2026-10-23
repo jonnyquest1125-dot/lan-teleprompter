@@ -35,7 +35,17 @@ body{background:#000;color:#fff;font-family:-apple-system,"PingFang SC","Microso
 .ed .sb{padding:12px;margin-top:8px;border:none;border-radius:6px;background:#007aff;color:#fff;font-size:15px;cursor:pointer}
 .ed .nt{color:#555;font-size:12px;margin-top:6px;line-height:1.5}
 
-.vw{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.vw{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+/* 镜头框: 只露 8-10 个字, 居中落在镜头位置; 点一下 = 下一句 */
+.cam{position:absolute;z-index:15;display:none;flex-direction:column;justify-content:center;background:#000;
+     overflow:hidden}
+.cam.on{display:flex}
+.cam .ct{width:100%}
+.cam .cl{white-space:pre;text-align:center;color:#fff}
+.cam .cl.dim{opacity:.22}
+
+
+
 .vw.mirror{-webkit-transform:scaleX(-1);transform:scaleX(-1)}
 .vw .tx{text-align:center;padding:20px;width:100%;word-break:break-word;line-height:1.7;overflow-y:auto;max-height:100%;-webkit-text-size-adjust:none;text-size-adjust:none}
 .mline{white-space:pre;text-align:inherit}
@@ -64,6 +74,7 @@ body{background:#000;color:#fff;font-family:-apple-system,"PingFang SC","Microso
 <div class="tbar">
   <span class="tt">提词器 <b id="meter">—</b></span>
   <div class="tb">
+    <button class="h" id="camBtn" onclick="camToggle()" title="镜头框">🎯</button>
     <button class="h" onclick="openEd()">✏️</button>
     <button class="h" id="mirrorBtn" onclick="toggleMirror()">⇄</button>
     <button class="b" onclick="toggleFull()">⛶</button>
@@ -76,22 +87,26 @@ body{background:#000;color:#fff;font-family:-apple-system,"PingFang SC","Microso
   <div class="nt">保存在电脑那一端，手机和电脑看到的永远同一份。已录到第几段会重回到第 1 段。</div>
 </div>
 
-<div class="vw" id="viewer">
+<div class="vw" id="viewer" onclick="camTap()">
   <div class="tx idle" id="textBox">电脑端控台还没发稿 — 等它在 /pc 发送后这里会自动出现</div>
+  <div class="cam" id="camBox"><div class="ct" id="camTxt"></div></div>
 </div>
+<span id="camRuler"></span>
 
 <div class="cbar" id="ctrlBar">
+  
   <button class="nav" id="prevBtn" onclick="step(-1)">‹ 上一段</button>
   <button onclick="szDown()">A−</button>
   <span class="sv" id="szVal">32</span>
   <button onclick="szUp()">A＋</button>
   <button class="nav" id="nextBtn" onclick="step(1)">下一段 ›</button>
+  
 </div>
 
 <script>
 var sz = 32, mir = false;
 var revSeen = -1, curIdx = 0, total = 0, editing = false;
-var APP_VER = "2026-10-22-samebreaks2";     // 与服务端 server.py 的 APP_VER 必须一致
+var APP_VER = "2026-10-24-cambox14";     // 与服务端 server.py 的 APP_VER 必须一致
 /* 谁在访问: 手机是 phone, 电脑控台里那个缩小预览是 pcprev(不计入"手机在线") */
 var CLIENT = (function(){
   var m = /[?&]c=([a-z]+)/.exec(location.search);
@@ -204,6 +219,7 @@ function render(d){
     : "—";
   $("prevBtn").disabled = !total || curIdx <= 0;
   $("nextBtn").disabled = !total || curIdx >= total - 1;
+  camSync(d.text);          // 镜头框: 段文字变了就重新切句
 }
 
 /* 文本指纹: 让电脑端确认"这组折行是这段文字的", 换段不会用错 */
@@ -427,6 +443,240 @@ function reportVp(){
                     body: JSON.stringify(body)}).catch(function(){});
 }
 
+/* ===== 镜头框 (camera box) =====
+   手机屏上是一列"歌词式"文字: 中间两行亮着(每行约 10 个字) = 现在要读的, 上下各留两行暗色上下文;
+   点屏幕一下 = 往下推两行, 本段末自动接下一段。
+   每行字数 / 框的位置由电脑控台调(服务端存), 手机照做; 框里露的每一行都报给控台照画 */
+var camCfg = {on:0, n:10, dx:0, dy:0};
+var camSeqSeen = 0, camSeqInit = false, camLines = [], camStart = 0, camText = "", camKey = "",
+    camGeo = null, camPosSig = "", camSlots = [], camB0 = 0, camB1 = 1, camAbove = 0, camBelow = 0;
+
+var CAM_STOP = "，。！？；：、…—,.!?;:";
+var CAM_BAND = 2;                 // 中间亮着两行
+
+/* 逐字量宽(带缓存): 汉字/全角标点宽, 数字英文窄, 按实际宽度排行, 不按字数硬切 */
+var camWCache = {};
+function camCharW(ch){
+  if(camWCache[ch] !== undefined) return camWCache[ch];
+  var cs = getComputedStyle($("textBox")), r = $("camRuler");
+  r.style.position = "fixed"; r.style.left = "-99999px"; r.style.top = "0";
+  r.style.visibility = "hidden"; r.style.whiteSpace = "pre"; r.style.pointerEvents = "none";
+  r.style.fontFamily = cs.fontFamily; r.style.fontSize = cs.fontSize;
+  r.textContent = ch || "字";
+  var w = r.getBoundingClientRect().width;
+  if(!(w > 0)) w = parseFloat(cs.fontSize) || 32;
+  camWCache[ch] = w;
+  return w;
+}
+
+/* 排成一行行: 只在标点处断, 绝不拆开语句 ——
+   先把文字切成"到标点为止"的小句, 再按字数装箱(一行放得下就并, 放不下就另起一行) */
+function camBuildLines(txt, cap, maxW){
+  txt = txt || "";
+  var units = [], cur = "", i, ch;
+  for(i = 0; i < txt.length; i++){
+    ch = txt.charAt(i);
+    if(ch === "\n" || ch === "\r") continue;
+    cur += ch;
+    if(CAM_STOP.indexOf(ch) >= 0){ units.push(cur); cur = ""; }
+  }
+  if(cur) units.push(cur);                       // 末尾没有标点的半句也单独成句
+
+  var lines = [], line = "";
+  for(i = 0; i < units.length; i++){
+    var u = units[i];
+    if(!line){ line = u; continue; }
+    if((line + u).length <= cap) line += u;      // 并得下就并成一行(仍在标点处接)
+    else { lines.push(line); line = u; }
+  }
+  if(line) lines.push(line);
+
+  /* 兜底: 只有"整句长到屏幕都放不下"(一句里一个标点都没有)时才按宽度切, 正常句子不动 */
+  var out2 = [];
+  for(i = 0; i < lines.length; i++){
+    var L = lines[i];
+    if(!maxW || camLineW(L) <= maxW){ out2.push(L); continue; }
+    var t2 = "", w2 = 0;
+    for(var j = 0; j < L.length; j++){
+      var cw = camCharW(L.charAt(j));
+      if(t2 && w2 + cw > maxW){ out2.push(t2); t2 = ""; w2 = 0; }
+      t2 += L.charAt(j); w2 += cw;
+    }
+    if(t2) out2.push(t2);
+  }
+  return out2;
+}
+
+/* 一行实测宽(逐字量, 带缓存) */
+function camLineW(t){
+  var w = 0;
+  for(var i = 0; i < (t || "").length; i++) w += camCharW(t.charAt(i));
+  return w;
+}
+
+/* 上下各留几行暗色上下文: 按这块屏幕真能放几行算 */
+function camCtx(){
+  var lh = parseFloat(getComputedStyle($("textBox")).lineHeight) || (sz * 1.7);
+  var vh = $("viewer").clientHeight || 0;
+  var fit = Math.floor((vh - 12) / lh);
+  return Math.max(0, Math.min(3, Math.floor((fit - CAM_BAND) / 2)));
+}
+
+/* 框: 宽 = cap 个字, 高 = 槽位数 × 行高; 两行亮字正好在正中(所以框中心就是镜头点) */
+function layoutCam(lh){
+  var box = $("camBox"), vwEl = $("viewer"), tb = $("textBox");
+  var cs = getComputedStyle(tb);
+  var cap = Math.max(4, Math.min(20, camCfg.n || 10));
+  var vwW = vwEl.clientWidth, vwH = vwEl.clientHeight;
+  /* 框宽 = 本段最长那一行(整句不拆, 长句就把框放宽), 至少 0.6 倍目标字数, 最宽不出屏 */
+  var maxLW = 0;
+  for(var q2 = 0; q2 < camLines.length; q2++) maxLW = Math.max(maxLW, camLineW(camLines[q2]));
+  var W = Math.round(Math.max(maxLW, camCharW("字") * Math.max(4, Math.round(cap * 0.6)))) + 12;
+  if(W > vwW - 24) W = vwW - 24;
+  var H = Math.round(lh * Math.max(1, camSlots.length)) + 8;
+  var left = Math.round((vwW - W) / 2 + (camCfg.dx || 0));
+  var bandCy = vwH / 2 + (camCfg.dy || 0);              // 亮的两行的中心 = 镜头点
+  var top = Math.round(bandCy - (camAbove + 1) * lh - 4);
+  box.style.width = W + "px"; box.style.height = H + "px";
+  box.style.left = left + "px"; box.style.top = top + "px";
+  box.style.fontSize = cs.fontSize; box.style.lineHeight = lh + "px";
+  box.style.fontFamily = cs.fontFamily;
+  camGeo = {x: left + (vwEl.offsetLeft || 0), y: top + (vwEl.offsetTop || 0),
+            w: W, h: H, fs: parseFloat(cs.fontSize) || sz, lh: Math.round(lh * 10) / 10, cap: cap};
+}
+
+function paintCam(){
+  var box = $("camBox"), tb = $("textBox");
+  if(!box) return;
+  if(!camCfg.on){
+    box.classList.remove("on");
+    if(tb) tb.style.visibility = "";
+    camGeo = null;
+    postCamPos();
+    return;
+  }
+  box.classList.add("on");
+  if(tb) tb.style.visibility = "hidden";
+
+  var cap = Math.max(4, Math.min(20, camCfg.n || 10));
+  var key = hashTxt(camText) + "|" + cap;
+  if(key !== camKey){
+    camKey = key; camWCache = {};
+    camLines = camBuildLines(camText, cap, ($("viewer").clientWidth || 720) - 24);
+    camStart = 0;
+  }
+  if(camStart >= camLines.length) camStart = 0;
+
+  var lh = parseFloat(getComputedStyle(tb).lineHeight) || (sz * 1.7);
+  var vh2 = $("viewer").clientHeight || 0;
+  var bandCy = vh2 / 2 + (camCfg.dy || 0);
+  bandCy = Math.max(lh + 2, Math.min(vh2 - lh - 2, bandCy));   // 亮的两行整块不许被顶栏/底栏切掉
+  var ctxMax = camCtx();
+  /* 上下各留几行暗字, 按这块屏幕真实剩余空间分配: 亮的两行压在镜头点上, 框不许顶出屏幕 */
+  camAbove = Math.max(0, Math.min(ctxMax, Math.floor((bandCy - lh) / lh)));
+  camBelow = Math.max(0, Math.min(ctxMax, Math.floor((vh2 - bandCy - lh) / lh)));
+  camSlots = []; camB0 = camAbove;
+  for(var k = camAbove; k >= 1; k--) camSlots.push(camLines[camStart - k] || "");
+  for(var b = 0; b < CAM_BAND; b++) camSlots.push(camLines[camStart + b] || "");
+  camB1 = camAbove + CAM_BAND - 1;
+  for(var d = 1; d <= camBelow; d++) camSlots.push(camLines[camStart + CAM_BAND - 1 + d] || "");
+
+  layoutCam(lh);
+
+  var ct = $("camTxt");
+  ct.innerHTML = "";
+  for(var s2 = 0; s2 < camSlots.length; s2++){
+    var dv = document.createElement("div");
+    dv.className = "cl" + ((s2 >= camB0 && s2 <= camB1) ? " hot" : " dim");
+    dv.textContent = camSlots[s2] || "\u00a0";
+    ct.appendChild(dv);
+  }
+  postCamPos();
+}
+
+/* 告诉电脑端: 框里现在是哪几行、哪几行是亮的、框在手机上真正的位置尺寸(控台照这个画) */
+function postCamPos(){
+  if(CLIENT !== "phone") return;
+  var g = camGeo || {};
+  var sig = [camCfg.on, camStart, camLines.length, curIdx, g.x, g.y, g.w, g.h, sz,
+             camSlots.join("|")].join("~");
+  if(sig === camPosSig) return;
+  camPosSig = sig;
+  fetch("/api/campos", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({c:"phone", camOn: camCfg.on ? 1 : 0, ln: camSlots, b0: camB0, b1: camB1,
+      ph: camLines[camStart] || "", line: camStart, lines: camLines.length, idx: curIdx,
+      x: g.x || 0, y: g.y || 0, w: g.w || 0, h: g.h || 0,
+      fs: g.fs || sz, lh: g.lh || 0, n: camCfg.n, dx: camCfg.dx || 0, dy: camCfg.dy || 0,
+      mir: mir ? 1 : 0, vw: Math.round(window.innerWidth), vh: Math.round(window.innerHeight)})}).catch(function(){});
+}
+
+/* 段文字一变 -> 重新排行, 从第一行开始 */
+function camSync(txt){
+  camText = txt || "";
+  camWCache = {};
+  var key = hashTxt(camText) + "|" + camCfg.n;
+  if(key !== camKey){ camKey = key; camLines = camBuildLines(camText, camCfg.n, ($("viewer").clientWidth || 720) - 24); camStart = 0; }
+  paintCam();
+}
+
+/* 点屏幕(或点框) = 往下推两行; 段末自动接下一段 */
+function camTap(){ if(camCfg.on) camStep(1); }
+
+function camStep(dir){
+  if(!camCfg.on) return;
+  var nextSeg = function(){
+    if(total > 0 && curIdx < total - 1){
+      fetch("/api/next", {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({delta:1, c:CLIENT})})
+        .then(function(r){return r.json()}).then(function(d){ if(d && d.ok) render(d); }).catch(function(){});
+    }
+  };
+  if(!camLines.length){ if(dir > 0) nextSeg(); return; }
+  var np = camStart + (dir || 1) * CAM_BAND;
+  if(np < 0){ camStart = 0; paintCam(); return; }
+  if(np >= camLines.length){
+    if(dir > 0) nextSeg();
+    else { camStart = Math.max(0, camLines.length - 1); paintCam(); }
+    return;
+  }
+  camStart = np; paintCam();
+}
+
+/* 电脑端改了开关/字数/位置 -> 这边跟上; 也接控台发来的「下一句/上一句」 */
+function camApply(c){
+  if(!c) return;
+  var on = c.on | 0, n = c.n | 0, dx = c.dx | 0, dy = c.dy | 0;
+  var changed = (on !== camCfg.on) || (n !== camCfg.n) || (dx !== camCfg.dx) || (dy !== camCfg.dy);
+  camCfg.on = on; camCfg.n = n; camCfg.dx = dx; camCfg.dy = dy;
+  if(changed){
+    camKey = ""; camWCache = {};
+    if(on){ camLines = camBuildLines(camText, n, ($("viewer").clientWidth || 720) - 24); camStart = 0; }
+    paintCam();
+    updateCamBtn();
+  }
+  /* 第一次收到配置只记序号、不执行: 否则每次刷新页面都会把上一条命令再执行一遍 */
+  if(!camSeqInit){ camSeqInit = true; camSeqSeen = c.seq | 0; return; }
+  if((c.seq | 0) > camSeqSeen){
+    camSeqSeen = c.seq | 0;
+    if(c.cmd === "next") camStep(1); else if(c.cmd === "prev") camStep(-1);
+  }
+}
+
+function updateCamBtn(){
+  var b = $("camBtn");
+  if(b) b.classList.toggle("active", !!camCfg.on);
+}
+
+function camToggle(){
+  var want = camCfg.on ? 0 : 1;
+  fetch("/api/cam", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({on:want, c:CLIENT})}).then(function(r){return r.json()}).then(function(d){
+      if(d && d.ok) camApply(d.cam);
+    }).catch(function(){ camCfg.on = want; paintCam(); updateCamBtn(); });
+}
+
+window.addEventListener("resize", function(){ if(camCfg.on) paintCam(); });
+
 /* 轮询：电脑一按发送，这里自己换词，不用手动刷新（手动刷也有效） */
 function poll(){
   var q = "/api/state?c=" + CLIENT;
@@ -434,6 +684,7 @@ function poll(){
   fetch(q, {cache:"no-store"}).then(function(r){return r.json()}).then(function(d){
     if(!d || !d.ok) return;
     if(verStale(d)) return;
+    camApply(d.cam);          // 电脑端调的开关/字数/位置/上一句下一句
     reportVp();
     if(d.rev !== revSeen){ revSeen = d.rev; render(d); }
     else { curIdx = d.idx; total = d.total; }
@@ -513,6 +764,7 @@ if(document.fonts && document.fonts.ready){
   document.fonts.ready.then(function(){ lastWrapKey = ""; lastVpSent = 0; reportVp(); });
 }
 
+updateCamBtn();
 /* 上电即取一次，然后每 1.2s 轮询 */
 poll();
 setInterval(poll, 400);           // 快一点: 换段/改字号后立刻重算折行报给电脑端

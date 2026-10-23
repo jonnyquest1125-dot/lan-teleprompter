@@ -17,6 +17,18 @@ python server.py --demo     # 首次运行写入演示稿; 不带 --demo 就是�
 
 > 手机上、电脑上看到的是同一个服务端的同一份状态(稿子/段号/字号都存服务端 `state.json`)，任一端操作另一端实时跟上。
 
+## 镜头框：对着镜头读（新版）
+
+手机屏上只显示一小列字，位置就是镜头那一点 —— 眼睛看着提词器时，视线正好落在镜头里。
+
+- 中间**两行亮白** = 现在要读的（每行约 10 个字）；上下各留若干行**暗色上下文**，像歌词那样滚动
+- **断行只认标点**：一行 = 一个完整短句（或几个短句），一句话绝不从中间切断
+- **点手机屏幕一下 = 往下推一屏**（两行）；到本段末尾再点一下自动接下一段
+- 电脑控台里那个绿虚线框 = 手机上那个框：拖框挪位置，拖右下角 / 滚轮改每行字数，点框 / 空格 / 回车 / → 下一屏，← 上一屏，Shift+方向键 每次微调 2px
+- 手机顶栏的 🎯 开关镜头框；关掉就回到原来的一屏一段
+
+Camera-hugging mode: a narrow column of text sits exactly where the lens is, so the gaze stays on the camera. The middle two lines are bright (about 10 characters each) with dimmed context above and below; line breaks are only allowed at punctuation.
+
 ## 为什么"换行完全一致"是这个项目最难的部分
 
 iOS 与桌面浏览器的字形推进相差 1~3%，同一段文字在同一宽度下可能差出整整一行。本项目不试图"算准"，而是：

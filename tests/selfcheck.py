@@ -88,6 +88,28 @@ def main():
         code, d = post("/api/font", {"fs": 8, "c": "test"})
         check("字号下限 16", d.get("fs") == 16)
 
+        code, html = fetch_raw("/")
+        check("手机页含镜头框元素", 'id="camBox"' in html)
+
+        code, d = get("/api/state?c=test")
+        check("镜头框默认关闭", (d.get("cam") or {}).get("on") == 0)
+        code, d = post("/api/cam", {"on": 1, "n": 12, "c": "test"})
+        cam = d.get("cam") or {}
+        check("镜头框开关/字数", cam.get("on") == 1 and cam.get("n") == 12)
+        code, d = post("/api/cam", {"n": 99, "c": "test"})
+        check("镜头框字数上限 20", (d.get("cam") or {}).get("n") == 20)
+        code, d = post("/api/cam", {"n": 1, "c": "test"})
+        check("镜头框字数下限 4", (d.get("cam") or {}).get("n") == 4)
+        seq0 = (d.get("cam") or {}).get("seq", 0)
+        code, d = post("/api/cam", {"cmd": "next", "c": "test"})
+        cam = d.get("cam") or {}
+        check("翻屏命令 seq 递增", cam.get("seq") == seq0 + 1 and cam.get("cmd") == "next")
+        code, d = post("/api/campos", {"camOn": 1, "ln": ["第一行，", "第二行。"], "b0": 0, "b1": 1,
+                                       "w": 300, "h": 100, "c": "test"})
+        code, d = get("/api/state?c=test")
+        cp = d.get("campos") or {}
+        check("镜头框上报可回读", cp.get("camOn") == 1 and cp.get("ln") == ["第一行，", "第二行。"] and cp.get("w") == 300)
+
         code, d = post("/api/clear", {})
         check("清空", d.get("total") == 0)
 

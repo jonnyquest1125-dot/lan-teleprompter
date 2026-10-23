@@ -23,13 +23,19 @@ from urllib.parse import urlparse
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.environ.get("TP_STATE", os.path.join(ROOT, "state.json"))
-VPX_FILE = os.path.join(ROOT, "vpx.json")          # 手机上报的布局数据, 落盘防丢
-WRAPS_FILE = os.path.join(ROOT, "wraps.json")      # 手机预计算的每段折行, 落盘防丢
+DATA_DIR = os.path.dirname(os.path.abspath(STATE_FILE))   # 运行期数据跟 state.json 放同一个目录
+VPX_FILE = os.path.join(DATA_DIR, "vpx.json")         # 手机上报的布局数据, 落盘防丢
+WRAPS_FILE = os.path.join(DATA_DIR, "wraps.json")     # 手机预计算的每段折行, 落盘防丢
+CAMPOS_FILE = os.path.join(DATA_DIR, "campos.json")   # 镜头框: 手机报来的当前几行 + 框的实测几何
 PORT = int(os.environ.get("TP_PORT", "8000"))
 
 DEFAULT_FS = 32          # 手机显示字号, 16-72
 FS_STEP = 4
-APP_VER = "2026-10-22-samebreaks2"      # 页面版本: 手机/电脑页面对不上就自己刷新, 免得跑旧 JS
+APP_VER = "2026-10-24-cambox14"      # 页面版本: 手机/电脑页面对不上就自己刷新, 免得跑旧 JS
+
+# 镜头框(camera box): 手机屏上只露几行、每行约 10 个字, 落在镜头那一点, 上下留暗色上下文
+# 两端共用同一份配置: on 开关 / n 每行目标字数 / dx,dy 位置微调 / seq+cmd 控台发来的翻屏命令
+CAM_DEFAULT = {"on": 0, "n": 10, "dx": 0, "dy": 0, "seq": 0, "cmd": ""}
 
 
 def clamp_fs(v):
@@ -38,6 +44,26 @@ def clamp_fs(v):
     except Exception:
         v = DEFAULT_FS
     return max(16, min(72, v))
+
+
+def clamp_cam(src):
+    """镜头框配置(两端共用): 开关/字数/位置偏移/命令序号, 范围在这里兜住。"""
+    c = dict(CAM_DEFAULT)
+    if isinstance(src, dict):
+        for k in ("on", "n", "dx", "dy", "seq"):
+            if k in src:
+                try:
+                    c[k] = int(src[k])
+                except Exception:
+                    pass
+        if isinstance(src.get("cmd"), str):
+            c["cmd"] = src["cmd"][:8]
+    c["on"] = 1 if c["on"] else 0
+    c["n"] = max(4, min(20, c["n"]))
+    c["dx"] = max(-500, min(500, c["dx"]))
+    c["dy"] = max(-400, min(400, c["dy"]))
+    c["seq"] = max(0, c["seq"])
+    return c
 
 
 def lan_ip():
@@ -55,11 +81,12 @@ def lan_ip():
 LAN_IP = lan_ip()
 
 _lock = threading.Lock()
-_state = {"segs": [], "idx": 0, "rev": 1, "fs": DEFAULT_FS}
+_state = {"segs": [], "idx": 0, "rev": 1, "fs": DEFAULT_FS, "cam": dict(CAM_DEFAULT)}
 _last_seen = {}
 # 手机自报的可视区(CSS px): 预览按它来, 才是"和手机完全一样"的尺寸
 _vp = {"w": 844, "h": 390}
 _vpx = {}          # 手机报上来的详细尺寸/量到的元素尺寸
+_campos = {}       # 镜头框: 手机报来的当前几行 + 框的实测几何(控台照这个画)
 _shot = {"data": b"", "v": 0}   # (已停用)手机 canvas 截图, iOS 上不准
 _wraps = {}        # 手机预先算好的每段折行: idx -> {wh, wraps, lws}
 
@@ -84,11 +111,12 @@ def load_state():
         idx = int(d.get("idx") or 0)
         rev = int(d.get("rev") or 1)
         fs = clamp_fs(d.get("fs", DEFAULT_FS))
-        _state = {"segs": segs, "idx": max(0, min(idx, max(0, len(segs) - 1))), "rev": rev, "fs": fs}
+        _state = {"segs": segs, "idx": max(0, min(idx, max(0, len(segs) - 1))), "rev": rev, "fs": fs,
+                  "cam": clamp_cam(d.get("cam"))}
     except Exception:
-        _state = {"segs": [], "idx": 0, "rev": 1, "fs": DEFAULT_FS}
+        _state = {"segs": [], "idx": 0, "rev": 1, "fs": DEFAULT_FS, "cam": dict(CAM_DEFAULT)}
 
-    for path, target in ((VPX_FILE, _vpx), (WRAPS_FILE, _wraps)):
+    for path, target in ((VPX_FILE, _vpx), (WRAPS_FILE, _wraps), (CAMPOS_FILE, _campos)):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 d = json.load(f)
@@ -150,6 +178,8 @@ def public_state():
         "ver": APP_VER,
         "vp": {"w": _vp["w"], "h": _vp["h"]},
         "shotv": _shot["v"],
+        "cam": _state["cam"],
+        "campos": _campos,
         "updated": int(time.time()),
     }
 
@@ -324,6 +354,25 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 save_json(VPX_FILE, _vpx)
+                return self._json({"ok": 1})
+
+            if p == "/api/cam":
+                c = dict(_state["cam"])
+                for k in ("on", "n", "dx", "dy"):
+                    if k in body:
+                        c[k] = body[k]
+                if body.get("cmd"):        # 控台按「下一屏/上一屏」: 手机轮询时读到就翻
+                    c["cmd"] = str(body["cmd"])
+                    c["seq"] = int(c.get("seq") or 0) + 1
+                _state["cam"] = clamp_cam(c)
+                save_state()
+                self._touch(body.get("c") or "pc")
+                return self._json(public_state())
+
+            if p == "/api/campos":
+                _campos.clear()
+                _campos.update({k: v for k, v in body.items() if k != "c"})
+                save_json(CAMPOS_FILE, _campos)
                 return self._json({"ok": 1})
 
             if p == "/api/wraps":

@@ -63,6 +63,20 @@ ol li .del:hover{color:#ff8080;background:none}
 .n{color:#5b6270;font-size:12px}
 .sent{color:#34c759;font-size:12px;margin-left:6px;opacity:0;transition:opacity .2s}
 .sent.on{opacity:1}
+/* 镜头框: 按手机报回来的位置/尺寸原样画, 可拖 */
+.cambox{position:absolute;display:none;align-items:center;justify-content:center;background:#000;
+  border:1px dashed #34c759;border-radius:6px;overflow:hidden;cursor:move;z-index:5;
+  font-family:"TPFont","Microsoft YaHei",sans-serif}
+.cambox .cbtx{width:100%;pointer-events:none;display:flex;flex-direction:column;justify-content:center}
+.cambox .cbtx .cl{white-space:pre;text-align:center;color:#fff}
+.cambox .cbtx .cl.dim{opacity:.22}
+.cbh{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 46%,#34c759 46%);border-bottom-right-radius:5px}
+.camcard{margin-top:12px;padding:10px 12px;border:1px solid #26303d;border-radius:8px;background:#0d1219}
+.camcard .camhdr{font-size:12.5px;color:#8a8f98;margin-bottom:4px}
+.camcard .camhdr b{color:#34c759}
+.camcard .navrow{margin-top:6px;gap:6px}
+.camcard .navrow button{padding:7px 8px;font-size:12.5px}
+.camcard .camphrase{font-size:12px;color:#c9ced8;line-height:1.6;margin-top:8px;word-break:break-all}
 </style>
 </head>
 <body>
@@ -86,6 +100,7 @@ ol li .del:hover{color:#ff8080;background:none}
         <div class="phonestage" id="phonestage">
           <div class="mtbar" id="mtbar">提词器</div>
           <div class="mbody" id="mbody"><div class="mtx" id="mtx">等手机上那页报数据…</div></div>
+          <div class="cambox" id="cambox"><span class="cbtx" id="camboxTxt"></span><div class="cbh" id="cbHandle"></div></div>
           <div class="mcbar" id="mcbar">
             <span>‹ 上一段</span><span>A−</span><span id="msz">—</span><span>A＋</span><span>下一段 ›</span>
           </div>
@@ -108,6 +123,7 @@ ol li .del:hover{color:#ff8080;background:none}
         <div class="navrow">
           <button id="keyBtn" onclick="toggleKeys()">键盘 ↑↓ 换段：关</button>
         </div>
+                <div class="hint" id="camHint" style="display:none">镜头框：拖框挪位置 · 拖右下角或滚轮改字数 · 点框/空格 = 下一句 · Shift+方向键微调</div>
         <div class="hint">字号两端共用：这里改了手机跟着变，手机上调了这里也跟着变。键盘按钮点一下变「开」，鼠标不在输入框里时按 ↑ / ↓ 就是上一段 / 下一段。</div>
       </div>
     </div>
@@ -147,7 +163,7 @@ ol li .del:hover{color:#ff8080;background:none}
 
 <script>
 var lastRev = -1, lastSegs = "", total = 0, idx = 0;
-var APP_VER = "2026-10-22-samebreaks2";     // 与服务端 server.py 的 APP_VER 必须一致
+var APP_VER = "2026-10-24-cambox14";     // 与服务端 server.py 的 APP_VER 必须一致
 
 function $(id){return document.getElementById(id)}
 
@@ -258,6 +274,16 @@ var phoneVpx = null;
 function paintTruth(){
   var v = phoneVpx;
   var el = $("truth");
+  /* 镜头框模式: 手机上只露那一框, 整段的折行/行数不再适用, 这行改成报框里的实况 */
+  if(camOn && camPos && (camPos.w | 0)){
+    var li = camPos.ln || [], b0t = (camPos.b0 | 0), b1t = (camPos.b1 | 0);
+    el.innerHTML = "镜头框：<b class='ok'>第 " + ((camPos.idx | 0) + 1) + "/" + total + " 段 · 第 "
+      + (((camPos.line | 0) / 2) + 1) + " 屏/" + Math.max(1, Math.ceil((camPos.lines | 0) / 2)) + " 屏</b> · 框 <b>"
+      + (camPos.w | 0) + "×" + (camPos.h | 0) + "px</b>"
+      + "<br>亮着：" + li.slice(b0t, b1t + 1).filter(function(x){ return x; }).map(function(x){ return "「" + x + "」" }).join("");
+    return;
+  }
+
   if(!v || !v.lines){
     el.innerHTML = "手机实测：<span class='dim'>等手机上那页报数据…（打开手机提词器即可）</span>";
     return;
@@ -337,7 +363,7 @@ function paintMock(){
   var P = v.padT || "20px", R = v.padR || "20px", B = v.padB || "20px", L = v.padL || "20px";
   el.style.padding = P + " " + R + " " + B + " " + L;
   el.style.textAlign = v.ta || "center";
-  // 控台始终正向显示(用户要正常读), 不跟手机镜像
+  // 控台始终正向显示, 不跟手机镜像
 
   /* 折行来源: 只认手机给的。
      1) 实时上报(v.wraps)一定是最新排版下算的, 优先;
@@ -428,6 +454,117 @@ document.addEventListener("keydown", function(e){
 });
 paintKeyBtn();
 
+/* ===== 镜头框 (camera box) =====
+   控台上这个绿框就是手机上那个框: 拖 = 挪位置, 拖右下角 / 滚轮 = 改字数,
+   点框 / 空格 / → = 下一句, ← = 上一句, Shift+方向键 = 微调位置。
+   框里露的是哪两行、框在手机上的真实位置尺寸, 都由手机报回来, 这里只照画 */
+var camOn = 0, camN = 9, camDx = 0, camDy = 0, camPos = null;
+
+function applyCam(c){
+  if(!c) return;
+  camOn = c.on | 0; camN = c.n || 9; camDx = c.dx | 0; camDy = c.dy | 0;
+  var h = $("camHint");
+  if(h) h.style.display = camOn ? "" : "none";
+}
+
+function camPost(body){
+  body.c = "pc";
+  return post("/api/cam", body).then(function(d){
+    if(!d || !d.ok) return;
+    applyCam(d.cam);
+    if(d.campos) camPos = d.campos;
+    paintCamBox();
+  }).catch(function(){});
+}
+
+function camNudge(dx, dy){ camPost({dx: camDx + dx, dy: camDy + dy}); }
+
+function paintCamBox(){
+  var b = $("cambox"), mtx = $("mtx");
+  if(!b) return;
+  if(mtx) mtx.style.visibility = camOn ? "hidden" : "";
+  if(!camOn || !camPos || !(camPos.camOn | 0) || !(camPos.w | 0)){ b.style.display = "none"; return; }
+  b.style.display = "flex";
+  b.style.left = (camPos.x | 0) + "px";
+  b.style.top = (camPos.y | 0) + "px";
+  b.style.width = (camPos.w | 0) + "px";
+  b.style.height = (camPos.h | 0) + "px";
+  b.style.fontSize = (camPos.fs || 32) + "px";
+  b.style.lineHeight = (camPos.lh || 0) + "px";
+  var lnC = (camPos.ln && camPos.ln.length) ? camPos.ln : [camPos.ph || ""];
+  var b0 = (camPos.b0 === undefined ? 0 : (camPos.b0 | 0));
+  var b1 = (camPos.b1 === undefined ? 1 : (camPos.b1 | 0));
+  var ct2 = $("camboxTxt"); ct2.innerHTML = "";
+  for(var i2 = 0; i2 < lnC.length; i2++){
+    var d2 = document.createElement("div");
+    d2.className = "cl" + ((i2 >= b0 && i2 <= b1) ? " hot" : " dim");
+    d2.textContent = lnC[i2] || "\u00a0";
+    ct2.appendChild(d2);
+  }
+}
+
+/* 框上的鼠标操作 */
+(function(){
+  var b = $("cambox");
+  if(!b) return;
+  var drag = null, moved = false;
+
+  b.addEventListener("pointerdown", function(e){
+    if(!camOn || !camPos || !(camPos.w | 0)) return;
+    var corner = !!(e.target && e.target.id === "cbHandle");
+    drag = {corner:corner, sx:e.clientX, sy:e.clientY, dx:camDx, dy:camDy,
+            x:(camPos.x | 0), y:(camPos.y | 0), w:(camPos.w | 0), n:camN, nx:null};
+    moved = false;
+    try{ b.setPointerCapture(e.pointerId); }catch(err){}
+    e.preventDefault();
+  });
+
+  b.addEventListener("pointermove", function(e){
+    if(!drag) return;
+    var k = ($("phonebox").clientWidth / curW) || 1;
+    var ddx = Math.round((e.clientX - drag.sx) / k);
+    var ddy = Math.round((e.clientY - drag.sy) / k);
+    if(Math.abs(ddx) > 1 || Math.abs(ddy) > 1) moved = true;
+    if(drag.corner){                       /* 拖右下角 = 改字数(一个字多少宽按当前框宽反推) */
+      var perChar = drag.w / (drag.n + 1);
+      drag.nx = Math.max(4, Math.min(20, drag.n + Math.round(ddx / Math.max(4, perChar))));
+      return;
+    }
+    b.style.left = (drag.x + ddx) + "px";
+    b.style.top = (drag.y + ddy) + "px";
+    drag.ndx = drag.dx + ddx; drag.ndy = drag.dy + ddy;
+  });
+
+  b.addEventListener("pointerup", function(){
+    if(!drag) return;
+    var d = drag; drag = null;
+    if(d.corner){ if(d.nx !== null && d.nx !== camN) camPost({n:d.nx}); return; }
+    if(moved) camPost({dx:(d.ndx === undefined ? camDx : d.ndx), dy:(d.ndy === undefined ? camDy : d.ndy)});
+    else camPost({cmd:"next"});            /* 点一下 = 下一句 */
+  });
+  b.addEventListener("pointercancel", function(){ drag = null; });
+
+  b.addEventListener("wheel", function(e){
+    if(!camOn) return;
+    e.preventDefault();                    /* 滚轮 = 改字数, 不滚页面 */
+    camPost({n: Math.max(4, Math.min(20, camN + (e.deltaY > 0 ? -1 : 1)))});
+  }, {passive:false});
+})();
+
+/* 键盘: 空格 / 回车 / → = 下一句, ← = 上一句, Shift+方向键 = 微调位置 */
+document.addEventListener("keydown", function(e){
+  if(!camOn) return;
+  var tag = ((e.target && e.target.tagName) || "").toUpperCase();
+  if(tag === "TEXTAREA" || tag === "INPUT") return;
+  if(e.shiftKey){
+    var m = {ArrowUp:[0,-2], ArrowDown:[0,2], ArrowLeft:[-2,0], ArrowRight:[2,0]}[e.key];
+    if(m){ e.preventDefault(); camNudge(m[0], m[1]); }
+    return;
+  }
+  if(e.key === " " || e.key === "Enter" || e.key === "ArrowRight"){ e.preventDefault(); camPost({cmd:"next"}); }
+  else if(e.key === "ArrowLeft"){ e.preventDefault(); camPost({cmd:"prev"}); }
+});
+
 /* 完整的 /api/full 返回 → 重绘 */
 function render(d){
   total = d.total || 0;
@@ -443,8 +580,11 @@ function render(d){
   if(d.vpx) phoneVpx = d.vpx;
   if(d.shotv !== undefined) curShotv = d.shotv;
   if(d.segwraps) curSegWraps = d.segwraps; else if(d.idx !== undefined) curSegWraps = null;
+  applyCam(d.cam);
+  if(d.campos) camPos = d.campos;
   paintTruth();
   paintMock();
+  paintCamBox();
   if(d.lan) $("addrPhone").textContent = "http://" + d.lan + ":" + (d.port || 8000) + "/";
   $("prev").disabled = !total || idx <= 0;
   $("next").disabled = !total || idx >= total - 1;
@@ -487,8 +627,11 @@ function renderFromState(d){
   if(d.vpx) phoneVpx = d.vpx;
   if(d.shotv !== undefined) curShotv = d.shotv;
   if(d.segwraps) curSegWraps = d.segwraps; else if(d.idx !== undefined) curSegWraps = null;
+  applyCam(d.cam);
+  if(d.campos) camPos = d.campos;
   paintTruth();
   paintMock();
+  paintCamBox();
   $("prev").disabled = !total || idx <= 0;
   $("next").disabled = !total || idx >= total - 1;
   var lis = $("list").children;
